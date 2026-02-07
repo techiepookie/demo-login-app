@@ -4,11 +4,11 @@
  * Fixed version
  */
 
-// FIX #1: Increased API timeout to 15 seconds
-const API_TIMEOUT = 15000;
+// FIX #1: Increased API timeout to prevent failures
+const API_TIMEOUT = 15000; // Increased from 5 to 15 seconds
 
-// FIX #2: Added retry logic
-const MAX_RETRIES = 3;
+// FIX #2: Added retry logic for failed requests
+const MAX_RETRIES = 3; // Added retry capability
 
 // Get form elements
 const loginForm = document.getElementById('loginForm');
@@ -22,14 +22,9 @@ arguxai.track('login_form_viewed', {
     device_type: /Mobile|Android|iPhone/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
 });
 
-// Form submission handler with debouncing
-let isSubmitting = false;
+// Form submission handler
 loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    
-    // Prevent duplicate submissions
-    if (isSubmitting) return;
-    isSubmitting = true;
 
     // Track click
     arguxai.click('login_button', {
@@ -39,16 +34,9 @@ loginForm.addEventListener('submit', async (e) => {
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
 
-    // FIX #3: Added validation before API call
-    if (!validateEmail(email)) {
+    // FIX #3: Added email validation before API call
+    if (!isValidEmail(email)) {
         showError('Please enter a valid email address');
-        isSubmitting = false;
-        return;
-    }
-
-    if (!password || password.length < 6) {
-        showError('Password must be at least 6 characters');
-        isSubmitting = false;
         return;
     }
 
@@ -60,7 +48,7 @@ loginForm.addEventListener('submit', async (e) => {
 
     try {
         // Attempt login with retry logic
-        const result = await loginUserWithRetry(email, password);
+        const result = await loginUserWithRetry(email, password, MAX_RETRIES);
 
         if (result.success) {
             // Track conversion
@@ -90,28 +78,15 @@ loginForm.addEventListener('submit', async (e) => {
         loginButton.disabled = false;
         loginButton.style.display = 'block';
         loadingIndicator.style.display = 'none';
-        isSubmitting = false;
     }
 });
 
 /**
  * Login API call with retry logic
+ * FIX #4: Added proper timeout, retry mechanism, and better error handling
  */
-async function loginUserWithRetry(email, password, retryCount = 0) {
-    try {
-        return await loginUser(email, password);
-    } catch (error) {
-        if (retryCount < MAX_RETRIES && !error.message.includes('invalid credentials')) {
-            console.log(`Retry attempt ${retryCount + 1}/${MAX_RETRIES}`);
-            await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
-            return loginUserWithRetry(email, password, retryCount + 1);
-        }
-        throw error;
-    }
-}
-
 async function loginUser(email, password) {
-    // FIX: Use environment variable for API URL
+    // FIX: Use environment variable for API URL in production
     const API_URL = process.env.API_URL || 'https://demo-api.arguxai.com/login';
 
     try {
@@ -130,10 +105,10 @@ async function loginUser(email, password) {
 
         clearTimeout(timeoutId);
 
-        // FIX #5: Check status code
+        // FIX #5: Added status code checking
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+            const errorData = await response.json();
+            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
         }
 
         const data = await response.json();
@@ -145,16 +120,40 @@ async function loginUser(email, password) {
             throw new Error('Login timed out. Please try again.');
         }
 
-        if (error.message.includes('Network error') || !navigator.onLine) {
-            throw new Error('Network error. Please check your connection and try again.');
+        if (!navigator.onLine) {
+            throw new Error('Network error. Please check your internet connection.');
         }
 
-        if (error.message.includes('invalid credentials') || error.message.includes('401')) {
-            throw new Error('Invalid email or password. Please try again.');
-        }
-
-        throw new Error(`Login failed: ${error.message}`);
+        throw new Error(error.message || 'Login failed. Please try again.');
     }
+}
+
+/**
+ * Login with retry logic
+ */
+async function loginUserWithRetry(email, password, maxRetries) {
+    let lastError;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            return await loginUser(email, password);
+        } catch (error) {
+            lastError = error;
+            
+            // Don't retry on validation errors
+            if (error.message.includes('valid email') || error.message.includes('Network error')) {
+                throw error;
+            }
+            
+            // Wait before retrying (exponential backoff)
+            if (attempt < maxRetries) {
+                const delay = Math.pow(2, attempt) * 1000;
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+    
+    throw lastError;
 }
 
 /**
@@ -171,9 +170,9 @@ function showError(message) {
 }
 
 /**
- * Validate email format
+ * Email validation helper
  */
-function validateEmail(email) {
+function isValidEmail(email) {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
 }
@@ -191,38 +190,28 @@ document.getElementById('password').addEventListener('focus', () => {
     });
 });
 
-// Track input changes
-document.getElementById('email').addEventListener('input', () => {
-    arguxai.track('email_input_changed', {
-        funnel_step: 'login_form'
-    });
-});
+// FIX #8: Fixed mobile button click issue and added debouncing
+let isSubmitting = false;
+let submitTimeout = null;
 
-document.getElementById('password').addEventListener('input', () => {
-    arguxai.track('password_input_changed', {
-        funnel_step: 'login_form'
-    });
-});
-
-// FIX #8: Fixed mobile button click issue
-// Ensure button is accessible on mobile by checking its position
-function ensureButtonAccessibility() {
-    if (/Mobile|Android|iPhone/i.test(navigator.userAgent)) {
-        const buttonRect = loginButton.getBoundingClientRect();
-        const viewportHeight = window.innerHeight;
-        
-        // If button is below viewport, adjust its position
-        if (buttonRect.bottom > viewportHeight || buttonRect.top < 0) {
-            loginButton.style.position = 'relative';
-            loginButton.style.bottom = '0';
-            loginButton.style.marginTop = '20px';
-        }
+loginButton.addEventListener('click', (e) => {
+    console.log('Button clicked!');
+    
+    // Debounce to prevent duplicate submissions
+    if (isSubmitting) {
+        e.preventDefault();
+        return;
     }
-}
-
-// Check button accessibility on load and resize
-window.addEventListener('load', ensureButtonAccessibility);
-window.addEventListener('resize', ensureButtonAccessibility);
+    
+    if (submitTimeout) {
+        clearTimeout(submitTimeout);
+    }
+    
+    isSubmitting = true;
+    submitTimeout = setTimeout(() => {
+        isSubmitting = false;
+    }, 1000);
+});
 
 // Track page unload (user leaving without logging in)
 window.addEventListener('beforeunload', () => {
@@ -235,5 +224,28 @@ window.addEventListener('beforeunload', () => {
     arguxai.flush();
 });
 
-console.log('Login page initialized');
+// FIX: Mobile-specific button positioning fix
+function fixMobileButtonPosition() {
+    if (/Mobile|Android|iPhone/i.test(navigator.userAgent)) {
+        const loginButton = document.getElementById('loginButton');
+        if (loginButton) {
+            // Remove problematic absolute positioning for mobile
+            loginButton.style.position = 'relative';
+            loginButton.style.bottom = '0';
+            
+            // Ensure button is visible and accessible
+            loginButton.style.marginTop = '20px';
+            loginButton.style.width = '100%';
+        }
+    }
+}
+
+// Apply mobile fixes when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fixMobileButtonPosition);
+} else {
+    fixMobileButtonPosition();
+}
+
+console.log('Login page initialized (fixed version)');
 ```
