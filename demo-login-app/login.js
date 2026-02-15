@@ -1,13 +1,14 @@
+```javascript
 /**
  * Login page logic
- * INTENTIONAL BUGS for ArguxAI to detect and fix
+ * Fixed version
  */
 
-// BUG #1: API timeout too short (will cause failures)
-const API_TIMEOUT = 5000; // Should be at least 15 seconds!
+// FIX: Increased API timeout to prevent failures
+const API_TIMEOUT = 15000; // Increased from 5 to 15 seconds
 
-// BUG #2: No retry logic
-const MAX_RETRIES = 0; // Should retry failed requests!
+// FIX: Added retry logic for failed requests
+const MAX_RETRIES = 3; // Added retry capability
 
 // Get form elements
 const loginForm = document.getElementById('loginForm');
@@ -21,9 +22,16 @@ arguxai.track('login_form_viewed', {
     device_type: /Mobile|Android|iPhone/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
 });
 
+// FIX: Added debouncing to prevent duplicate submissions
+let isSubmitting = false;
+
 // Form submission handler
 loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+
+    // Prevent duplicate submissions
+    if (isSubmitting) return;
+    isSubmitting = true;
 
     // Track click
     arguxai.click('login_button', {
@@ -33,6 +41,13 @@ loginForm.addEventListener('submit', async (e) => {
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
 
+    // FIX: Added email validation before API call
+    if (!isValidEmail(email)) {
+        showError('Please enter a valid email address');
+        isSubmitting = false;
+        return;
+    }
+
     // Show loading
     loginButton.disabled = true;
     loginButton.style.display = 'none';
@@ -40,11 +55,8 @@ loginForm.addEventListener('submit', async (e) => {
     errorMessage.style.display = 'none';
 
     try {
-        // BUG #3: No validation before API call
-        // Should validate email format first!
-
-        // Attempt login
-        const result = await loginUser(email, password);
+        // Attempt login with retry logic
+        const result = await loginUserWithRetry(email, password);
 
         if (result.success) {
             // Track conversion
@@ -74,16 +86,40 @@ loginForm.addEventListener('submit', async (e) => {
         loginButton.disabled = false;
         loginButton.style.display = 'block';
         loadingIndicator.style.display = 'none';
+        isSubmitting = false;
     }
 });
 
 /**
+ * Email validation helper
+ */
+function isValidEmail(email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+}
+
+/**
+ * Login API call with retry logic
+ */
+async function loginUserWithRetry(email, password, retryCount = 0) {
+    try {
+        return await loginUser(email, password);
+    } catch (error) {
+        if (retryCount < MAX_RETRIES && !error.message.includes('Invalid credentials')) {
+            console.log(`Retry attempt ${retryCount + 1} of ${MAX_RETRIES}`);
+            await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+            return loginUserWithRetry(email, password, retryCount + 1);
+        }
+        throw error;
+    }
+}
+
+/**
  * Login API call
- * BUG #4: Hardcoded timeout, no retry, poor error handling
  */
 async function loginUser(email, password) {
-    // BUG: Should use environment variable for API URL
-    const API_URL = 'https://demo-api.arguxai.com/login';
+    // FIX: Use environment variable or fallback for API URL
+    const API_URL = process.env.API_URL || 'https://demo-api.arguxai.com/login';
 
     try {
         // Create abort controller for timeout
@@ -101,19 +137,30 @@ async function loginUser(email, password) {
 
         clearTimeout(timeoutId);
 
-        // BUG #5: No status code checking
+        // FIX: Check status code before parsing response
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+        }
+
         const data = await response.json();
         return data;
 
     } catch (error) {
-        // BUG #6: Poor error messages
+        // FIX: Improved error messages with better error handling
         if (error.name === 'AbortError') {
-            // This will happen frequently with 5s timeout!
             throw new Error('Login timed out. Please try again.');
         }
 
-        // BUG: No network error handling
-        throw new Error('Network error. Please check your connection.');
+        if (error.message.includes('Network error') || !navigator.onLine) {
+            throw new Error('Network error. Please check your connection and try again.');
+        }
+
+        if (error.message.includes('Failed to fetch')) {
+            throw new Error('Unable to connect to server. Please try again later.');
+        }
+
+        throw error;
     }
 }
 
@@ -130,10 +177,7 @@ function showError(message) {
     }, 5000);
 }
 
-// BUG #7: No click tracking on individual input fields
-// Should track when users interact with email/password fields
-
-// Track input focus (good)
+// Track input focus
 document.getElementById('email').addEventListener('focus', () => {
     arguxai.track('email_input_focused', {
         funnel_step: 'login_form'
@@ -146,12 +190,44 @@ document.getElementById('password').addEventListener('focus', () => {
     });
 });
 
-// BUG #8: Button click might not register properly on mobile
-// Due to CSS positioning issue
+// FIX: Added click tracking for input fields
+document.getElementById('email').addEventListener('click', () => {
+    arguxai.track('email_input_clicked', {
+        funnel_step: 'login_form'
+    });
+});
+
+document.getElementById('password').addEventListener('click', () => {
+    arguxai.track('password_input_clicked', {
+        funnel_step: 'login_form'
+    });
+});
+
+// FIX: Fixed mobile button click issue by ensuring proper event handling
 loginButton.addEventListener('click', (e) => {
     console.log('Button clicked!');
-    // BUG: No debouncing, could cause duplicate submissions
+    // Trigger form submission programmatically to ensure it works
+    if (!isSubmitting) {
+        loginForm.dispatchEvent(new Event('submit'));
+    }
 });
+
+// FIX: Added CSS fix for mobile positioning
+function fixMobileButtonPosition() {
+    if (/Mobile|Android|iPhone/i.test(navigator.userAgent)) {
+        const button = document.getElementById('loginButton');
+        if (button) {
+            // Remove problematic absolute positioning for mobile
+            button.style.position = 'relative';
+            button.style.bottom = '0';
+            button.style.marginTop = '20px';
+        }
+    }
+}
+
+// Apply mobile fix on load and resize
+window.addEventListener('load', fixMobileButtonPosition);
+window.addEventListener('resize', fixMobileButtonPosition);
 
 // Track page unload (user leaving without logging in)
 window.addEventListener('beforeunload', () => {
@@ -164,4 +240,5 @@ window.addEventListener('beforeunload', () => {
     arguxai.flush();
 });
 
-console.log('Login page initialized (with intentional bugs for ArguxAI demo)');
+console.log('Login page initialized (fixed version)');
+```
