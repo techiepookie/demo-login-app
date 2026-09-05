@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Demo App (ArguxAI Monitored)</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="login-card">
+            <div class="logo">
+                <h1>🔐 Demo App</h1>
+                <p class="subtitle">Powered by ArguxAI Analytics</p>
+            </div>
+            
+            <form id="loginForm" class="login-form">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input 
+                        type="email" 
+                        id="email" 
+                        name="email" 
+                        placeholder="Enter your email"
+                        required
+                    />
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input 
+                        type="password" 
+                        id="password" 
+                        name="password" 
+                        placeholder="Enter your password"
+                        required
+                    />
+                </div>
+                
+                <!-- INTENTIONAL BUG: Button positioned off-screen on mobile -->
+                <button 
+                    type="submit" 
+                    id="loginButton" 
+                    class="login-button"
+                >
+                    Login
+                </button>
+                
+                <div id="loadingIndicator" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <span>Logging in...</span>
+                </div>
+                
+                <div id="errorMessage" class="error-message" style="display: none;"></div>
+            </form>
+            
+            <div class="footer">
+                <p>Don't have an account? <a href="/signup.html">Sign up</a></p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ArguxAI SDK -->
+    <script src="arguxai-sdk.js"></script>
+    
+    <!-- Configuration -->
+    <script>
+        // Initialize ArguxAI SDK
+        window.ARGUXAI_CONFIG = {
+            apiKey: 'demo',
+            apiUrl: 'http://localhost:8000',
+            metadata: {
+                app_name: 'demo-login-app',
+                app_version: '1.0.0',
+                environment: 'production'
+            }
+        };
+        
+        // Initialize SDK
+        window.arguxai = new ArguxAI(window.ARGUXAI_CONFIG);
+        
+        // Track page view
+        arguxai.page('login_page', {
+            funnel_step: 'login_form'
+        });
+    </script>
+    
+    <!-- App Logic (with intentional bugs) -->
+    <script src="login.js"></script>
+</body>
+</html>
